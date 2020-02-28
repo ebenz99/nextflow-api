@@ -1,21 +1,20 @@
-Deploy a Nextflow-API Server to Kubernetes Using Helm 
-===
+# Deploy Nextflow-API to Kubernetes Using Helm
 
 This guide assumes you have access to a K8s cluster, and either a valid PVC or storage class on that cluster.
 
-#### 0. Download Helm 3
+## Install Helm
 
-Go to the [Helm Release Page](https://github.com/helm/helm/releases) and download the lastest release that begins with **Helm v3.x.x**. Follow the installation instructions.
+Follow the [installation instructions](https://helm.sh/docs/intro/install) from the Helm documentation to install Helm. The Helm chart for Nextflow-API is confirmed to work on [Helm v3.0.0-beta3](https://github.com/helm/helm/releases/tag/v3.0.0-beta.3), but it is failing on many newer versions of Helm, so if you have issues deploying Nextflow-API then try using that exact version.
 
-Helm 3 is used because it does not require installing anything on the K8s cluster, while Helm 2 requires the user to install Tiller. This chart should work with Helm 2 if needed. 
+Helm 3 is used because it does not require installing anything on the K8s cluster, while Helm 2 requires the user to install Tiller. This chart should work with Helm 2 if needed.
 
-#### 1. Configure Nextflow-API Server
+## Configure Nextflow-API Helm Chart
 
-The file `values.yaml` contains all of the configurable values across the chart. 
+The file `values.yaml` contains all of the configurable values for the chart.
 
-Edit the following values:
+Edit the following sections:
 
-##### PVC
+#### PVC
 ```
 # PVC
 NewLocalPVC:
@@ -23,8 +22,8 @@ NewLocalPVC:
   # (temp, future PVCs will be dynamically configurable)
   Enabled: true
   Name: nextflow-api-local
-  Size: 20Gi
   StorageClass: nfs
+  Size: 20Gi
 
 ExistingLocalPVC:
   # If true, use existing PVC on local cluster.
@@ -33,80 +32,103 @@ ExistingLocalPVC:
   Name: deepgtex-prp
 ```
 
-If you want to dynamically create a PVC:
+If you want to create a new PVC:
 
-1. Set NewLocalPVC to "True" and ExistingLocalPVC to "False"
-2. Change the "Name" to the PVC you have set up on your K8s cluster.
-3. Change the "StorageClass" and "Size" to whatever storage class and size you want to use.
+1. Set `NewLocalPVC` to `true` and `ExistingLocalPVC` to `false`
+2. Change the `Name` to the PVC you have set up on your K8s cluster.
+3. Change the `StorageClass` and `Size` to whatever storage class and size you want to use.
 
 If you want to use an existing PVC:
 
-1. Set NewLocalPVC to "False" and ExistingLocalPVC to "True"
-2. Change the "Name" to the PVC you have set up on your K8s cluster.
+1. Set `NewLocalPVC` to `false` and `ExistingLocalPVC` to `true`
+2. Change the `Name` to the PVC you have set up on your K8s cluster.
 
-**TODO:** Remote cluster configuration(disregard and leave "False" for now)
+__TODO__: Remote cluster configuration (disregard and leave `false` for now)
 
-##### Resources/Replicas
-
+#### Database and Web Server Deployments
 ```
-# Resource request per container
-Resources:
-  CPU: 250m
-  Memory: 1Gi
+# Database deployment settings
+Database:
+  # Resource requests and limits per container
+  Resources:
+    Requests:
+      CPU: 4
+      Memory: 8Gi
+    Limits:
+      CPU: 8
+      Memory: 16Gi
 
-# Number of containers
-Replicas: 1
+# Web server deployment settings
+WebServer:
+  # Number of containers
+  Replicas: 1
+  # Resource requests and limits per container
+  Resources:
+    Requests:
+      CPU: 1
+      Memory: 4Gi
+    Limits:
+      CPU: 1
+      Memory: 4Gi
 ```
 
-You may change the resource requests to your liking. Leave the number of replicas alone for now.
+Nextflow-API contains a database deployment and a web server deployment, which can optionally include multiple replicas. Note that you must use a `LoadBalancer` in order to have multiple web server replicas.
 
-##### Ingress 
-
+#### Ingress / LoadBalancer
 ```
 # Ingress control settings
 Ingress:
   # If true, use ingress control.
-  # Otherwise, generic LoadBalancer networking will be used, 
+  # Otherwise, generic LoadBalancer networking will be used,
   # and the other settings in this section will be ignored.
   Enabled: false
   # The subdomain to associate with this service.
-  # This will result in a FQDN like {subdomain}.{cluster}.slateci.net
   Host: nextflow-api.nautilus.optiputer.net
-  # The class of the ingress controller to use. 
-  # For SLATE this should be 'slate'. 
   Class: traefik
 ```
 
-Nextflow-API uses a LoadBalancer by default. To use an Ingress:
+Nextflow-API will either use an `Ingress` or a `LoadBalancer` to expose itself to the public Internet.
 
-1. Change Enabled to "True"
-2. Change the Host to "nextflow-api" + a valid DNS address.
-3. Change the Class if needed.
+To use an `Ingress`:
 
-Now the server is configured and ready for deployment!
+1. Set `Enabled` to `true`
+2. Change the `Host` to `nextflow-api.<domain>`. (ex. `nextflow-api.scigateway.net`)
+3. Change the `Class` if needed.
 
-#### 2. Deploy Nextflow Server
+To use a `LoadBalancer`, simply set `Enabled` to `false`
+
+Now the Helm Chart is configured and ready to deploy!
+
+## Deploy Nextflow-API
 
 Navigate to `nextflow-api/helm`
 
-Deploy using `helm install nf .`
+Deploy using `helm install nextflow-api .`
 
-#### 3. Use Nextflow Server
+## Use Nextflow-API
 
-If you are using an Ingress, navigate to the host you specified.
+#### Give Nextflow the necessary permissions to deploy jobs to your K8s cluster.
+````
+kubectl create rolebinding default-edit --clusterrole=edit --serviceaccount=default:default
+kubectl create rolebinding default-view --clusterrole=view --serviceaccount=default:default
+````
 
-##### LoadBalancer(default)
+These commands give the default service account the ability to view and edit cluster resources. Nextflow driver pods use this account to deploy process pods. This creates rolebindings in the `default` namespace. If you are not in the default namespace, use `KUBE_EDITOR="nano" kubectl edit rolebinding <role-binding>`. Edit the `namespace` to the one you are using, then save.
 
-Run `kubectl get svc` to get the service that is exposing your server to the internet.
+#### Ingress
 
-Record the **External IP** for the service `nf-nextflow-api`.
+If you are using an `Ingress`, simply navigate in your web browser to the `Host` that you specified.
 
-Open an internet browser, then navigate to `<EXT_IP>:8080` 
+#### LoadBalancer
 
-You may create and submit workflows from there.
+If you are using a `LoadBalancer`:
 
-#### 4. Delete deployment
+1. Run `kubectl get service` to list the services that are running in your cluster.
+2. Find the service named `nextflow-api` and record the `EXTERNAL-IP`.
+3. Navigate in your web browser to `<EXTERNAL-IP>:8080`
 
-If you'd like to destroy, use `helm delete nf`.
+All done! Now you can use Nextflow-API to submit and monitor workflows.
 
-All done!
+## Delete Deployment
+
+To delete the deployment, run `helm uninstall nextflow-api`.

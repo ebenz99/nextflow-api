@@ -277,7 +277,12 @@ class WorkflowLaunchHandler(tornado.web.RequestHandler):
 
 		try:
 			# update workflow status
-			await db.workflows.update_one({ "_id": workflow["_id"] }, { "$set": { "status": "running" } })
+			await db.workflows.update_one({ "_id": workflow["_id"] }, {
+				"$set": {
+					"status": "running",
+					"date_submitted": int(time.time() * 1000)
+				}
+			})
 
 			self.set_status(200)
 			self.write(message(200, "Workflow \"%s\" was launched" % id))
@@ -417,7 +422,8 @@ class TaskEditHandler(tornado.web.RequestHandler):
 
 if __name__ == "__main__":
 	# parse command-line options
-	tornado.options.define("np", default=0, help="number of server processes")
+	tornado.options.define("db-hostname", default="localhost", help="hostname of mongodb service")
+	tornado.options.define("np", default=1, help="number of server processes")
 	tornado.options.define("port", default=8080)
 	tornado.options.parse_command_line()
 
@@ -447,7 +453,7 @@ if __name__ == "__main__":
 		server.start(tornado.options.options.np)
 
 		# connect to database
-		client = motor.motor_tornado.MotorClient("mongodb://wmongo-service:27017")
+		client = motor.motor_tornado.MotorClient("mongodb://%s:27017" % (tornado.options.options.db_hostname))
 		db = client["nextflow_api"]
 		app.settings["db"] = db
 
